@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catch Log Pro</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#16213e">
+
+<style>
+body{font-family:Arial;background:#16213e;color:white;margin:0;padding:0}
+.container{max-width:1100px;margin:auto;padding:20px}
+input,select,button{padding:8px;margin:5px}
+button{cursor:pointer}
+table{width:100%;margin-top:20px;border-collapse:collapse}
+th,td{border:1px solid #333;padding:8px;text-align:left}
+.credit{color:#e84545;font-weight:bold}
+.paid{color:#4caf50;font-weight:bold}
+</style>
+</head>
+<body>
+
+<div id="login-container" class="container">
+<h2>Login</h2>
+<input type="email" id="email" placeholder="Email">
+<input type="password" id="password" placeholder="Password">
+<button onclick="login()">Login</button>
+<button onclick="signup()">Sign Up</button>
+</div>
+
+<div id="app-container" class="container" style="display:none;">
+<h2>Catch Log Pro</h2>
+<p id="user-email"></p>
+<button onclick="logout()">Logout</button>
+
+<h3>Add Catch</h3>
+<input type="text" id="inp-person" placeholder="Brought By">
+<input type="text" id="inp-type" placeholder="Fish Type">
+<input type="number" id="inp-amount" placeholder="Amount">
+<input type="number" id="inp-paid" placeholder="Amount Paid (optional)">
+<input type="date" id="inp-date">
+<input type="text" id="inp-notes" placeholder="Notes">
+<button onclick="addEntry()">Add</button>
+
+<button onclick="exportCSV()">Export to Excel</button>
+
+<table>
+<thead>
+<tr>
+<th>Person</th>
+<th>Fish</th>
+<th>Amount</th>
+<th>Paid</th>
+<th>Balance</th>
+<th>Date</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="log-body"></tbody>
+</table>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth,onAuthStateChanged,signOut,
+signInWithEmailAndPassword,
+createUserWithEmailAndPassword } 
+from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+import { getFirestore,collection,addDoc,
+deleteDoc,doc,onSnapshot,serverTimestamp,
+query,orderBy } 
+from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBjir5TQCryziBL8ZqaQpE_o9abNNyJHxM",
+  authDomain: "fish-market-89710.firebaseapp.com",
+  projectId: "fish-market-89710",
+  storageBucket: "fish-market-89710.firebasestorage.app",
+  messagingSenderId: "576625326707",
+  appId: "1:576625326707:web:6e31fb46e9fa3ce1628806"
+};
+
+const app=initializeApp(firebaseConfig);
+const auth=getAuth(app);
+const db=getFirestore(app);
+
+let entries=[];
+let unsubscribe=null;
+let currentUser=null;
+
+/* AUTH */
+
+window.login=async()=>{
+const email=emailInput.value.trim();
+const pass=passwordInput.value.trim();
+if(!email||!pass)return alert("Enter details");
+await signInWithEmailAndPassword(auth,email,pass);
+};
+
+window.signup=async()=>{
+const email=emailInput.value.trim();
+const pass=passwordInput.value.trim();
+if(pass.length<6)return alert("Password min 6 chars");
+await createUserWithEmailAndPassword(auth,email,pass);
+};
+
+window.logout=async()=>{
+if(unsubscribe)unsubscribe();
+await signOut(auth);
+};
+
+onAuthStateChanged(auth,user=>{
+if(user){
+currentUser=user;
+loginContainer.style.display="none";
+appContainer.style.display="block";
+userEmail.textContent=user.email;
+loadUserData(user.uid);
+}else{
+loginContainer.style.display="block";
+appContainer.style.display="none";
+entries=[];
+render();
+}
+});
+
+/* LOAD USER DATA */
+
+function loadUserData(uid){
+const userCatches=collection(db,"users",uid,"catches");
+const q=query(userCatches,orderBy("createdAt","desc"));
+unsubscribe=onSnapshot(q,snap=>{
+entries=snap.docs.map(d=>({id:d.id,...d.data()}));
+render();
+});
+}
+
+/* ADD ENTRY */
+
+window.addEntry=async()=>{
+if(!currentUser)return;
+
+const p=inpPerson.value.trim();
+const t=inpType.value.trim();
+const a=parseFloat(inpAmount.value);
+const paid=parseFloat(inpPaid.value)||0;
+const d=inpDate.value;
+const n=inpNotes.value.trim();
+
+if(!p||!t||!a||!d)return alert("Fill required");
+
+const balance=a-paid;
+
+const userCatches=collection(db,"users",currentUser.uid,"catches");
+
+await addDoc(userCatches,{
+person:p,
+type:t,
+amount:a,
+paid:paid,
+balance:balance,
+status:balance>0?"credit":"paid",
+date:d,
+notes:n,
+createdAt:serverTimestamp()
+});
+};
+
+/* DELETE */
+
+window._deleteEntry=async(id)=>{
+const ref=doc(db,"users",currentUser.uid,"catches",id);
+await deleteDoc(ref);
+};
+
+/* RENDER */
+
+function render(){
+const tbody=logBody;
+tbody.innerHTML="";
+entries.forEach(e=>{
+const tr=document.createElement("tr");
+tr.innerHTML=`
+<td>${e.person}</td>
+<td>${e.type}</td>
+<td>${e.amount}</td>
+<td>${e.paid||0}</td>
+<td class="${e.balance>0?'credit':'paid'}">
+${e.balance>0?'Owes '+e.balance:'Paid'}
+</td>
+<td>${e.date}</td>
+<td><button onclick="_deleteEntry('${e.id}')">X</button></td>
+`;
+tbody.appendChild(tr);
+});
+}
+
+/* EXPORT CSV */
+
+window.exportCSV=()=>{
+if(!entries.length)return alert("No data");
+
+let csv="Person,Fish,Amount,Paid,Balance,Date,Notes\n";
+entries.forEach(e=>{
+csv+=`${e.person},${e.type},${e.amount},${e.paid||0},${e.balance||0},${e.date},${e.notes||""}\n`;
+});
+
+const blob=new Blob([csv],{type:'text/csv'});
+const url=URL.createObjectURL(blob);
+const a=document.createElement('a');
+a.href=url;
+a.download="catch-log.csv";
+a.click();
+URL.revokeObjectURL(url);
+};
+
+/* PWA */
+if("serviceWorker" in navigator){
+navigator.serviceWorker.register("sw.js");
+}
+</script>
+
+</body>
+</html>
